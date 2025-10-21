@@ -20,7 +20,9 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
 
 API_KEY = config["api_key"]
 PROMPT_TEMPLATE = config["prompt"]
-DB_CONNECTION_STRING = config["db_connection"] 
+DB_CONNECTION_STRING = config["db_connection"]
+SERVER_HOST = config["server_host"]
+SERVER_PORT = config["server_port"]
 
 genai.configure(api_key=API_KEY)
 
@@ -160,6 +162,7 @@ def manejar_cliente(conn, addr):
 
     try:
         mensaje = json.loads(data)
+        print(f" Mensaje recibido: {mensaje}");
         transaction_id = mensaje["transaction_id"]
         audio_path = mensaje["audio_path"]
 
@@ -175,11 +178,11 @@ def manejar_cliente(conn, addr):
     conn.close()
     print(f" ATENCION: Conexion cerrada {addr}")
 
-def iniciar_socket_server(host="0.0.0.0", port=5000):
+def iniciar_socket_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((host, port))
+    server.bind((SERVER_HOST, SERVER_PORT))
     server.listen(5)
-    print(f"Servidor escuchando en {host}:{port}")
+    print(f"Servidor escuchando en {SERVER_HOST}:{SERVER_PORT}")
 
     while True:
         conn, addr = server.accept()
