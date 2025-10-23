@@ -1,30 +1,47 @@
 import os
-import re
 import json
 import socket
 import threading
+import traceback
 import speech_recognition as sr
 from pydub import AudioSegment
 from math import ceil
 import google.generativeai as genai
 import pyodbc
 from datetime import datetime
+import time
+import tempfile
+import signal
+import sys
 
 
 # CONFIGURACION GLOBAL
-
-CONFIG_PATH = "config.json"
+CONFIG_PATH = r"D:\Transcriptor y evaluador de llamadas\Comp\config.json"
 
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     config = json.load(f)
 
-API_KEY = config["api_key"]
-PROMPT_TEMPLATE = config["prompt"]
-DB_CONNECTION_STRING = config["db_connection"]
-SERVER_HOST = config["server_host"]
-SERVER_PORT = config["server_port"]
+API_KEY = config.get("api_key", "")
+PROMPT_TEMPLATE = config.get("prompt", "")
+DB_CONNECTION_STRING = config.get("db_connection", "")
+SERVER_HOST = config.get("server_host", "0.0.0.0")
+SERVER_PORT = int(config.get("server_port", 13000))
+RETRY_TIME = int(config.get("retry_time", 5))  # en minutos
+DEBUG_MODE = config.get("debug_mode", {"enabled": False})
 
 genai.configure(api_key=API_KEY)
+
+# Globals para control del servidor
+_server_thread = None
+_server_stop_event = threading.Event()
+_server_lock = threading.Lock()
+_last_server_ready = None
+
+# utilidades
+def log(msg):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] {msg}")
+
 
 # Conexion a SQL
 
@@ -123,71 +140,192 @@ def analizar_transcripcion(call_text, archivo_original):
 # Procesamiento de audio
 
 def procesar_audio(transaction_id, archivo_original):
-    print(f"\n Procesando TransactionId: {transaction_id}")
-    transcripcion = transcribir_audio(archivo_original)
-    if not transcripcion:
-        print("No se obtuvo transcripcion.")
+    log(f"Procesando TransactionId: {transaction_id} - {archivo_original}")
+    if not os.path.exists(archivo_original):
+        log("Archivo no existe: " + archivo_original)
         return
 
-    # Rutas de salida
-    base, _ = os.path.splitext(archivo_original)
-    ruta_transcripcion = f"{base};transcripcion.txt"
-    ruta_evaluacion_txt = f"{base};evaluacion.txt"
-    ruta_evaluacion_json = f"{base};evaluacion.json"
+    try:
+        transcripcion = transcribir_audio(archivo_original)
+        if not transcripcion:
+            log("No se obtuvo transcripción.")
+            return
 
-    # Guardar transcripcion como txt
-    with open(ruta_transcripcion, "w", encoding="utf-8") as f:
-        f.write(transcripcion)
+        base, _ = os.path.splitext(archivo_original)
+        ruta_transcripcion = f"{base};transcripcion.txt"
+        ruta_evaluacion_txt = f"{base};evaluacion.txt"
+        ruta_evaluacion_json = f"{base};evaluacion.json"
 
-    ejecutar_sp("SetTranscription", [transaction_id, ruta_transcripcion, os.path.basename(ruta_transcripcion)])
+        with open(ruta_transcripcion, "w", encoding="utf-8") as f:
+            f.write(transcripcion)
 
-    # Analizar transcripcion
-    evaluacion = analizar_transcripcion(transcripcion, archivo_original)
+        ejecutar_sp("SetTranscription", [transaction_id, ruta_transcripcion, os.path.basename(ruta_transcripcion)])
 
-    with open(ruta_evaluacion_json, "w", encoding="utf-8") as f:
-        json.dump(evaluacion, f, ensure_ascii=False, indent=4)
+        evaluacion = analizar_transcripcion(transcripcion, archivo_original)
 
-    with open(ruta_evaluacion_txt, "w", encoding="utf-8") as f:
-        f.write(json.dumps(evaluacion, ensure_ascii=False, indent=4))
+        with open(ruta_evaluacion_json, "w", encoding="utf-8") as f:
+            json.dump(evaluacion, f, ensure_ascii=False, indent=4)
 
-    ejecutar_sp("SetAnalysis", [transaction_id, ruta_evaluacion_json, os.path.basename(ruta_evaluacion_json)])
+        with open(ruta_evaluacion_txt, "w", encoding="utf-8") as f:
+            f.write(json.dumps(evaluacion, ensure_ascii=False, indent=4))
 
-    print(f" Proceso Finalizado Para {transaction_id}")
+        ejecutar_sp("SetAnalysis", [transaction_id, ruta_evaluacion_json, os.path.basename(ruta_evaluacion_json)])
+
+        log(f"Proceso finalizado para {transaction_id}")
+    except Exception as e:
+        log(f"Error en procesar_audio: {e}")
+        log(traceback.format_exc())
 
 # Inicio de conexion mediante Socket
-
 def manejar_cliente(conn, addr):
-    print(f" Conexion exitosa establecida desde {addr}")
-    data = conn.recv(4096).decode("utf-8")
-
+    log(f"Conexión desde {addr}")
     try:
-        mensaje = json.loads(data)
-        print(f" Mensaje recibido: {mensaje}");
-        transaction_id = mensaje["transaction_id"]
-        audio_path = mensaje["audio_path"]
+        data = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
 
-        if os.path.exists(audio_path):
-            procesar_audio(transaction_id, audio_path)
-            respuesta = {"status": "ok", "transaction_id": transaction_id}
-        else:
-            respuesta = {"status": "error", "mensaje": "Archivo no encontrado"}
-    except Exception as e:
-        respuesta = {"status": "error", "mensaje": str(e)}
+        if not data:
+            respuesta = {"status": "error", "mensaje": "No se recibieron datos"}
+            conn.send(json.dumps(respuesta).encode("utf-8"))
+            conn.close()
+            return
 
-    conn.send(json.dumps(respuesta).encode("utf-8"))
-    conn.close()
-    print(f" ATENCION: Conexion cerrada {addr}")
+        try:
+            mensaje = json.loads(data.decode("utf-8"))
+            log(f"Mensaje recibido: {mensaje}")
+            transaction_id = mensaje.get("transaction_id")
+            audio_path = mensaje.get("audio_path")
 
-def iniciar_socket_server():
+            if audio_path and os.path.exists(audio_path):
+                procesar_audio(transaction_id, audio_path)
+                respuesta = {"status": "ok", "transaction_id": transaction_id}
+            else:
+                respuesta = {"status": "error", "mensaje": "Archivo no encontrado"}
+        except Exception as e:
+            log(f"Error procesando mensaje JSON: {e}")
+            respuesta = {"status": "error", "mensaje": str(e)}
+
+        try:
+            conn.send(json.dumps(respuesta).encode("utf-8"))
+        except Exception as e:
+            log(f"Error enviando respuesta al cliente: {e}")
+    finally:
+        try:
+            conn.close()
+        except:
+            pass
+        log(f"Conexión cerrada {addr}")
+
+
+def iniciar_socket_server(stop_event):
+    global _last_server_ready
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((SERVER_HOST, SERVER_PORT))
-    server.listen(5)
-    print(f"Servidor escuchando en {SERVER_HOST}:{SERVER_PORT}")
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        server.bind((SERVER_HOST, SERVER_PORT))
+        server.listen(5)
+        _last_server_ready = datetime.now()
+        log(f"Servidor escuchando en {SERVER_HOST}:{SERVER_PORT}")
+    except Exception as e:
+        log(f"No fue posible enlazar el socket: {e}")
+        return
 
-    while True:
-        conn, addr = server.accept()
-        threading.Thread(target=manejar_cliente, args=(conn, addr)).start()
+    # aaqui se aceptan conexiones hasta que se dejen de obeneter
+    try:
+        while not stop_event.is_set():
+            try:
+                server.settimeout(1.0)
+                try:
+                    conn, addr = server.accept()
+                except socket.timeout:
+                    continue
+                threading.Thread(target=manejar_cliente, args=(conn, addr), daemon=True).start()
+            except Exception as e:
+                log(f"Error en bucle accept: {e}")
+    finally:
+        try:
+            server.close()
+        except:
+            pass
+        log("Servidor socket detenido.")
 
-# Ejcucion del programa
+
+# monitor y reinicio
+def monitor_server(stop_event):
+    global _server_thread, _server_stop_event
+    while not stop_event.is_set():
+        time.sleep(RETRY_TIME * 60)
+        if stop_event.is_set():
+            break
+
+        with _server_lock:
+            alive = _server_thread is not None and _server_thread.is_alive()
+            if not alive:
+                log("Detectado servidor no vivo. Reiniciando servidor...")
+                # intentar reiniciar
+                _server_stop_event = threading.Event()
+                _server_thread = threading.Thread(target=iniciar_socket_server, args=(_server_stop_event,), daemon=True)
+                _server_thread.start()
+                log("Servidor reiniciado por monitor.")
+            else:
+                log("Monitor: servidor OK.")
+
+
+# Degug mode, en caso de habilitar para pruebas
+def run_debug_once():
+    enabled = bool(DEBUG_MODE.get("enabled", False))
+    wav_file = DEBUG_MODE.get("wav_file", "")
+    if not enabled:
+        return
+    if not wav_file:
+        log("Debug mode activado pero no hay 'wav_file' en config.")
+        return
+    if not os.path.exists(wav_file):
+        log(f"Debug wav_file no encontrado: {wav_file}")
+        return
+
+    log("=== MODO DEBUG: procesando archivo de prueba ===")
+    try:
+        procesar_audio(transaction_id=999999, archivo_original=wav_file)
+    except Exception as e:
+        log(f"Error en debug processing: {e}")
+        log(traceback.format_exc())
+    log("=== FIN MODO DEBUG ===")
+
+
+# manejador de señales paa ciereres
+def _signal_handler(sig, frame):
+    log("Recibida señal de terminación. Deteniendo servidor...")
+    _server_stop_event.set()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
+
+# === EJECUCION PRINCIPAL ===
 if __name__ == "__main__":
-    iniciar_socket_server()
+    try:
+        # server
+        _server_stop_event = threading.Event()
+        _server_thread = threading.Thread(target=iniciar_socket_server, args=(_server_stop_event,), daemon=True)
+        _server_thread.start()
+
+        # monitor
+        monitor_stop = threading.Event()
+        monitor_thread = threading.Thread(target=monitor_server, args=(monitor_stop,), daemon=True)
+        monitor_thread.start()
+
+        # en caso de estar activado el debug se pruba sin detener
+        run_debug_once()
+
+        # Loop principal que maniticne acitviidad
+        while True:
+            time.sleep(1)
+    except Exception as e:
+        log(f"Error fatal en main: {e}")
+        log(traceback.format_exc())
