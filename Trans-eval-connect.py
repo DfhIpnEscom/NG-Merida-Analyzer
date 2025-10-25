@@ -15,8 +15,14 @@ import signal
 import sys
 
 
-# CONFIGURACION GLOBAL
-CONFIG_PATH = r"D:\Transcriptor y evaluador de llamadas\Comp\config.json"
+import os, sys
+
+# Detectar la carpeta donde se encuentra el exe(ahi debe estar el config)
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
 
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     config = json.load(f)
