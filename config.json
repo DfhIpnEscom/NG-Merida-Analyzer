@@ -3,5 +3,10 @@
   "prompt": "Eres un evaluador de calidad de atención al cliente en un call center.\nAnaliza la siguiente transcripción y evalúa el desempeño del agente según esta rúbrica:\n\n1. Saludo y presentación\n2. Verificación del cliente\n3. Escucha activa\n4. Identificación de la necesidad\n5. Conocimiento del producto/servicio\n6. Ofrecimiento de solución o alternativa\n7. Manejo de objeciones\n8. Empatía y tono\n9. Cierre y despedida\n10. Cumplimiento del protocolo\n\nTranscripción de la llamada:\n{call_text}\n\nDevuelve exclusivamente un JSON con la siguiente estructura:\n{\n  \"id_llamada\": \"\",\n  \"fecha\": \"\",\n  \"criterios\": {\n    \"saludo_presentacion\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"verificacion_cliente\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"escucha_activa\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"identificacion_necesidad\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"conocimiento_producto\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"ofrecimiento_solucion\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"manejo_objeciones\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"empatia_tono\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"cierre_despedida\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"cumplimiento_protocolo\": { \"comentario\": \"\", \"puntuacion\": 0 }\n  },\n  \"puntuacion_final\": 0,\n  \"puntuacion_transcripcion\": 0,\n  \"recomendacion\": \"\"\n}\n\nNo incluyas texto fuera del JSON.",
   "db_connection": "DRIVER={ODBC Driver 17 for SQL Server};SERVER=LAPTOP-DVNDBICT\\SQLEXPRESS;DATABASE=Merida_VW;UID=sa;PWD=1234",
   "server_host": "192.168.1.183",
-  "server_port": 13000
+  "server_port": 13000,
+  "retry_time": 5,
+  "debug_mode": {
+    "enabled": true,
+    "wav_file": "D:prueba.wav"
+  }
 }
