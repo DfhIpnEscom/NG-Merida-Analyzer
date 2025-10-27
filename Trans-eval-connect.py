@@ -14,15 +14,13 @@ import tempfile
 import signal
 import sys
 
-
-import os, sys
-
-# Detectar la carpeta donde se encuentra el exe(ahi debe estar el config)
+# Detectar la carpeta donde se encuentra el exe o el script
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-
 
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     config = json.load(f)
@@ -36,6 +34,7 @@ RETRY_TIME = int(config.get("retry_time", 5))  # en minutos
 DEBUG_MODE = config.get("debug_mode", {"enabled": False})
 
 genai.configure(api_key=API_KEY)
+
 
 # Globals para control del servidor
 _server_thread = None
