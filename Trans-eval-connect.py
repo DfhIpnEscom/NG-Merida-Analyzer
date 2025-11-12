@@ -106,14 +106,37 @@ def transcribir_audio(archivo_original):
 
 # Anlaisis GEMINI
 def analizar_transcripcion(call_text, archivo_original):
-    prompt = PROMPT_TEMPLATE.replace("{call_text}", call_text)
     model = genai.GenerativeModel("models/gemini-2.5-pro")
 
-    response = model.generate_content(prompt)
+    # separacion A/C
+    prompt_transcripcion = f"""
+Transcribe y separa la conversación dada en bloques hablados por el Agente o el Cliente.
+Devuelve el resultado exclusivamente en formato JSON con esta estructura exacta:
 
+{{
+  "transcription": [
+    {{"type": "Agente", "message": "Texto del agente"}},
+    {{"type": "Cliente", "message": "Texto del cliente"}}
+  ]
+}}
+
+Aquí está la transcripción original para analizar:
+{call_text}
+"""
+    try:
+        response_transcripcion = model.generate_content(prompt_transcripcion)
+        texto_transcripcion = response_transcripcion.text.strip()
+        json_str = texto_transcripcion[texto_transcripcion.index("{"): texto_transcripcion.rindex("}") + 1]
+        transcripcion_json = json.loads(json_str)
+    except Exception as e:
+        print(f"Error al parsear la transcripción separada: {e}")
+        transcripcion_json = {"transcription": [{"type": "Desconocido", "message": call_text}]}
+
+    # Evaluacion
+    prompt = PROMPT_TEMPLATE.replace("{call_text}", call_text)
+    response = model.generate_content(prompt)
     texto = response.text.strip()
 
-    # Intento de limpieza a texto extra en algun json
     if "{" in texto and "}" in texto:
         try:
             json_str = texto[texto.index("{"): texto.rindex("}") + 1]
@@ -122,9 +145,10 @@ def analizar_transcripcion(call_text, archivo_original):
             print(f"Error al decodificar JSON limpio: {e}")
             analisis = {"raw_response": texto}
     else:
-        print("Gemini no devolvio JSON, guardando texto bruto.")
+        print("Gemini no devolvió JSON, guardando texto bruto.")
         analisis = {"raw_response": texto}
 
+    # Estructura
     base, _ = os.path.splitext(archivo_original)
     nombre_base = os.path.basename(base)
     evaluacion_estandar = {
@@ -136,10 +160,21 @@ def analizar_transcripcion(call_text, archivo_original):
             "puntuacion_final": analisis.get("puntuacion_final", 0),
             "puntuacion_transcripcion": analisis.get("puntuacion_transcripcion", 0)
         },
-        "recomendacion": analisis.get("recomendacion", "")
+        "recomendacion": analisis.get("recomendacion", ""),
+        "transcripcion_json": transcripcion_json
     }
 
+    # Json transcripcion
+    ruta_transcripcion_json = f"{base};transcripcion.json"
+    try:
+        with open(ruta_transcripcion_json, "w", encoding="utf-8") as f:
+            json.dump(transcripcion_json, f, ensure_ascii=False, indent=4)
+        print(f"Transcripción JSON guardada en {ruta_transcripcion_json}")
+    except Exception as e:
+        print(f"Error guardando {ruta_transcripcion_json}: {e}")
+
     return evaluacion_estandar
+
 
 
 # Procesamiento de audio
