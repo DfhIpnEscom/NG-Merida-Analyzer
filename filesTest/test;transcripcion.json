@@ -1,0 +1,20 @@
+{
+    "transcription": [
+        {
+            "type": "Agente",
+            "message": "Buenas noches Alexander Nava de autopistas ideal con el señor José Guadalupe discúlpenos Comenta personal de la autopista que ya se encuentran en el lugar es correcto esta información y me indica personas de la autopista que ya se encuentran en el lugar es ya lo están apoyando"
+        },
+        {
+            "type": "Cliente",
+            "message": "Ya Muchas gracias"
+        },
+        {
+            "type": "Agente",
+            "message": "Que requiere algún otro tipo de apoyo o alguna información o alguna duda se puede comunicarse sin problema en este dado caso estaríamos dando por cerrado el folio señor José Le agradezco mucho el haber tomado mi llamada la atención Alexander lavado autopistas ideal que pases buena noche Hasta luego"
+        },
+        {
+            "type": "Cliente",
+            "message": "Hasta luego"
+        }
+    ]
+}

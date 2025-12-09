@@ -1,0 +1,72 @@
+{
+    "id_llamada": "test",
+    "fecha_evaluacion": "2025-11-21 08:40:02",
+    "ruta_audio": "C:\\Users\\DFH_I\\OneDrive\\Documentos\\GitHub\\NG-Merida-Analyzer\\filesTest\\test.wav",
+    "criterios": {
+        "saludo_presentacion": {
+            "comentario": "El agente se presenta con su nombre y el de la empresa. Sin embargo, la fraseología es confusa y poco profesional ('con el señor José Guadalupe discúlpenos').",
+            "puntuacion": 6
+        },
+        "verificacion_cliente": {
+            "comentario": "El agente verifica correctamente al titular del servicio al inicio de la llamada, preguntando por el 'señor José Guadalupe'.",
+            "puntuacion": 10
+        },
+        "escucha_activa": {
+            "comentario": "Aunque no se transcribe la respuesta del cliente, el agente actúa en consecuencia a la confirmación de la llegada de la ayuda, lo que sugiere que escuchó la respuesta. La interacción es demasiado corta para evaluarlo a fondo.",
+            "puntuacion": 7
+        },
+        "identificacion_necesidad": {
+            "comentario": "El agente identifica correctamente el motivo de la llamada, que es una llamada de seguimiento para confirmar que el cliente ya está recibiendo apoyo.",
+            "puntuacion": 10
+        },
+        "conocimiento_producto": {
+            "comentario": "El agente demuestra conocer el procedimiento al mencionar al 'personal de la autopista' y el protocolo de cierre de 'folio', lo que indica conocimiento del servicio de asistencia.",
+            "puntuacion": 9
+        },
+        "ofrecimiento_solucion": {
+            "comentario": "El agente confirma la solución (llegada de la ayuda) y proactivamente pregunta si el cliente necesita algo más ('requiere algún otro tipo de apoyo'), lo cual es correcto.",
+            "puntuacion": 9
+        },
+        "manejo_objeciones": {
+            "comentario": "No se presentan objeciones durante la llamada, por lo que este criterio no es aplicable.",
+            "puntuacion": 10
+        },
+        "empatia_tono": {
+            "comentario": "El tono es formal, pero la comunicación es atropellada y poco natural. El agente habla muy rápido y junta todas las frases, lo que reduce la calidad de la interacción y no transmite empatía.",
+            "puntuacion": 5
+        },
+        "cierre_despedida": {
+            "comentario": "El cierre contiene los elementos necesarios (agradecimiento, despedida cordial, repetición de nombre), pero la ejecución es deficiente y confusa ('la atención Alexander lavado autopistas ideal').",
+            "puntuacion": 6
+        },
+        "cumplimiento_protocolo": {
+            "comentario": "El agente sigue la estructura básica de una llamada de seguimiento: saludo, verificación, confirmación, oferta de ayuda adicional y cierre de folio. Cumple con el guion esperado.",
+            "puntuacion": 8
+        }
+    },
+    "scores": {
+        "puntuacion_final": 8.0,
+        "puntuacion_transcripcion": 2
+    },
+    "recomendacion": "El agente cumple con los pasos del protocolo, pero necesita mejorar significativamente su comunicación verbal. Se recomienda coaching en dicción, pausas y modulación para hablar de manera más clara y profesional. Estructurar las frases de forma individual en lugar de decirlas todas en una sola ráfaga mejorará drásticamente la claridad y la percepción del cliente.",
+    "transcripcion_json": {
+        "transcription": [
+            {
+                "type": "Agente",
+                "message": "Buenas noches Alexander Nava de autopistas ideal con el señor José Guadalupe discúlpenos Comenta personal de la autopista que ya se encuentran en el lugar es correcto esta información y me indica personas de la autopista que ya se encuentran en el lugar es ya lo están apoyando"
+            },
+            {
+                "type": "Cliente",
+                "message": "Ya Muchas gracias"
+            },
+            {
+                "type": "Agente",
+                "message": "Que requiere algún otro tipo de apoyo o alguna información o alguna duda se puede comunicarse sin problema en este dado caso estaríamos dando por cerrado el folio señor José Le agradezco mucho el haber tomado mi llamada la atención Alexander lavado autopistas ideal que pases buena noche Hasta luego"
+            },
+            {
+                "type": "Cliente",
+                "message": "Hasta luego"
+            }
+        ]
+    }
+}
