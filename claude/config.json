@@ -1,0 +1,10 @@
+{
+  "claude": {
+    "api_key": "anthropic",
+    "model": "claude-sonnet-4-20250514"
+  },
+  "rutas_audio": {
+    "archivo_original": "D:\\Amatech\\Transcriptor y evaluador de llamadas\\Arc_prueba\\DMCC_ext23580_2025_10_15_13;22;11;989.wav",
+    "archivo_convertido": "temp_pcm.wav"
+  }
+}
