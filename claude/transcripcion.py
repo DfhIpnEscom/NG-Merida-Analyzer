@@ -1,3 +1,10 @@
+import os
+from math import ceil
+import speech_recognition as sr
+from pydub import AudioSegment
+from log import log
+
+
 # transcripcion
 def transcribir_audio(archivo_original):
     archivo_convertido = "temp_pcm.wav"
@@ -37,3 +44,4 @@ def transcribir_audio(archivo_original):
 
     os.remove(archivo_convertido)
     return transcripcion.strip()
+
