@@ -5,7 +5,7 @@ from log import log
 from audio_process import procesar_audio
 from connection_settings import SERVER_HOST, SERVER_PORT
 import os
-import datetime
+from datetime import datetime
 
 # Inicio de conexion mediante Socket
 def manejar_cliente(conn, addr):
