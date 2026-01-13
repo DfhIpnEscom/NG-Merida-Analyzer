@@ -1,0 +1,33 @@
+{
+  "ai_provider": "Gemini",
+  "claude": {
+    "api_key": "XXXXXXXXXXX",
+    "model": "claude-sonnet-4-20250514"
+  },
+  "Gemini": {
+    "api_key": "XXXXXXXXXXX",
+    "model": "models/gemini-2.0-flash-exp"
+  },
+  "prompt": "Eres un evaluador de calidad de atención al cliente en un call center.\nAnaliza la siguiente transcripción y evalúa el desempeño del agente según esta rúbrica:\n\n1. Saludo y presentación\n2. Verificación del cliente\n3. Escucha activa\n4. Identificación de la necesidad\n5. Conocimiento del producto/servicio\n6. Ofrecimiento de solución o alternativa\n7. Manejo de objeciones\n8. Empatía y tono\n9. Cierre y despedida\n10. Cumplimiento del protocolo\n\nTranscripción de la llamada:\n{call_text}\n\nDevuelve exclusivamente un JSON con la siguiente estructura:\n{\n  \"id_llamada\": \"\",\n  \"fecha\": \"\",\n  \"criterios\": {\n    \"saludo_presentacion\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"verificacion_cliente\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"escucha_activa\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"identificacion_necesidad\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"conocimiento_producto\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"ofrecimiento_solucion\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"manejo_objeciones\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"empatia_tono\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"cierre_despedida\": { \"comentario\": \"\", \"puntuacion\": 0 },\n    \"cumplimiento_protocolo\": { \"comentario\": \"\", \"puntuacion\": 0 }\n  },\n  \"puntuacion_final\": 0,\n  \"puntuacion_transcripcion\": 0,\n  \"recomendacion\": \"\"\n}\n\nNo incluyas texto fuera del JSON.",
+  "db_connection": "DRIVER={ODBC Driver 17 for SQL Server};SERVER=LAPTOP-DVNDBICT\\SQLEXPRESS;DATABASE=Merida_VW;UID=sa;PWD=1234",
+  "sql_polling": {
+    "enabled": true,
+    "table_name": "AudioQueue",
+    "poll_interval_seconds": 30,
+    "max_records_per_batch": 10,
+    "status_field": "Estado",
+    "id_field": "TransactionId",
+    "audio_path_field": "RutaAudio",
+    "status_pending": "Pendiente",
+    "status_processing": "Procesando",
+    "status_completed": "Completado",
+    "status_error": "Error"
+  },
+  "server_host": "192.168.1.183",
+  "server_port": 13000,
+  "retry_time": 5,
+  "debug_mode": {
+    "enabled": false,
+    "wav_file": "D://Amatech//Transcriptor y evaluador de llamadas//Arc_prueba//DMCC_ext23580_2025_10_15_13;22;11;989.wav"
+  }
+}
