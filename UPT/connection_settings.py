@@ -34,15 +34,42 @@ SERVER_PORT = int(config.get("server_port", 13000))
 RETRY_TIME = int(config.get("retry_time", 5))  # en minutos
 DEBUG_MODE = config.get("debug_mode", {"enabled": False})
 
+# Configuración de límites de tokens
+TOKEN_LIMITS = config.get("token_limits", {
+    "monthly_limit": 1000000,
+    "warning_threshold": 0.8,
+    "check_enabled": True
+})
+
+# Configuración de características de procesamiento
+PROCESSING_FEATURES = config.get("processing_features", {
+    "transcription_enabled": True,
+    "analysis_enabled": True
+})
+
 # Configuración de SQL Polling
 SQL_POLLING_CONFIG = config.get("sql_polling", {
     "enabled": False,
+    "transcription": {
+        "sp_get_pending": "GetPendingTranscriptions",
+        "sp_set_result": "SetTranscription",
+        "poll_interval_seconds": 30,
+        "max_records_per_batch": 2,
+        "max_retries": 3
+    },
+    "analysis": {
+        "sp_get_pending": "GetPendingAnalysis",
+        "sp_set_result": "SetAnalysis",
+        "poll_interval_seconds": 30,
+        "max_records_per_batch": 2,
+        "max_retries": 3
+    },
+    "sp_get_monthly_tokens": "GetMonthlyTokenUsage",
     "table_name": "AudioQueue",
-    "poll_interval_seconds": 30,
-    "max_records_per_batch": 10,
     "status_field": "Estado",
     "id_field": "TransactionId",
     "audio_path_field": "RutaAudio",
+    "retry_count_field": "ReintentoCount",
     "status_pending": "Pendiente",
     "status_processing": "Procesando",
     "status_completed": "Completado",
@@ -61,3 +88,6 @@ else:
 
 print(f"[CONFIG] Proveedor de IA seleccionado: {AI_PROVIDER.upper()}")
 print(f"[CONFIG] SQL Polling: {'HABILITADO' if SQL_POLLING_CONFIG.get('enabled') else 'DESHABILITADO'}")
+print(f"[CONFIG] Transcripción: {'HABILITADA' if PROCESSING_FEATURES.get('transcription_enabled') else 'DESHABILITADA'}")
+print(f"[CONFIG] Análisis: {'HABILITADO' if PROCESSING_FEATURES.get('analysis_enabled') else 'DESHABILITADO'}")
+print(f"[CONFIG] Límite tokens/mes: {TOKEN_LIMITS.get('monthly_limit'):,} (Check: {'ON' if TOKEN_LIMITS.get('check_enabled') else 'OFF'})")
