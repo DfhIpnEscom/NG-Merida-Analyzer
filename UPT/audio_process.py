@@ -51,8 +51,8 @@ def procesar_transcripcion(transaction_id, archivo_original):
             logger.error("❌ No se obtuvo transcripción")
             return False, 0, 0, None
         
-        # Calcular tokens aproximados (estimación simple)
-        # Google Speech-to-Text no cobra por tokens sino por minuto
+        # Calcular tokens aproximados 
+        
         # Pero registramos una estimación para tracking
         estimated_tokens_in = len(archivo_original.encode('utf-8'))  # Aprox basado en tamaño de archivo
         estimated_tokens_out = len(transcripcion.split())  # Palabras en la transcripción
@@ -208,30 +208,30 @@ def procesar_audio_completo(transaction_id, archivo_original):
     logger.info(f"🎯 Procesamiento completo - TransactionId: {transaction_id}")
     
     # Paso 1: Transcripción
-    trans_success, trans_in, trans_out, trans_path = procesar_transcripcion(
+    transcription_success, transcription_in, transcription_out, transcription_path = procesar_transcripcion(
         transaction_id,
         archivo_original
     )
     
-    if not trans_success:
+    if not transcription_success:
         return False, 0, 0
     
     # Paso 2: Análisis (si está habilitado)
     if PROCESSING_FEATURES.get('analysis_enabled', True):
-        anal_success, anal_in, anal_out = procesar_analisis(
+        analysis_success, analysis_in, analysis_out = procesar_analisis(
             transaction_id,
             archivo_original,
-            trans_path
+            transcription_path
         )
         
-        if not anal_success:
-            logger.warning("⚠️ Análisis falló, pero transcripción completada")
-            return True, trans_in, trans_out
+        if not analysis_success:
+            logger.warning("⚠️ Análisis falló, pero transcriptioncripción completada")
+            return True, transcription_in, transcription_out
         
-        return True, trans_in + anal_in, trans_out + anal_out
+        return True, transcription_in + analysis_in, transcription_out + analysis_out
     else:
         logger.info("ℹ️ Análisis omitido (deshabilitado)")
-        return True, trans_in, trans_out
+        return True, transcription_in, transcription_out
 
 
 # Alias para compatibilidad con código existente
