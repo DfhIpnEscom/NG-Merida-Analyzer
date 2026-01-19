@@ -1,5 +1,5 @@
 """
-Main mejorado con sistema dual de polling (transcripción + análisis separados)
+Main con sistema dual polling ✔
 """
 import threading
 import time
@@ -24,7 +24,7 @@ token_manager = get_token_manager()
 
 
 def main():
-    """Función principal con sistema dual de polling"""
+    """Funcion principal sistema dual polling"""
     
     # Verificar configuración
     if not SQL_POLLING_CONFIG.get('enabled', False):
@@ -37,8 +37,8 @@ def main():
     logger.info("=" * 60)
     logger.info("AI EVALUATOR - SISTEMA DUAL DE POLLING")
     logger.info("=" * 60)
-    logger.info(f"Transcripción: {'✅ HABILITADA' if PROCESSING_FEATURES.get('transcription_enabled') else '❌ DESHABILITADA'}")
-    logger.info(f"Análisis: {'✅ HABILITADO' if PROCESSING_FEATURES.get('analysis_enabled') else '❌ DESHABILITADO'}")
+    logger.info(f"Transcripción: {'✔ HABILITADA' if PROCESSING_FEATURES.get('transcription_enabled') else '❌ DESHABILITADA'}")
+    logger.info(f"Análisis: {'✔ HABILITADO' if PROCESSING_FEATURES.get('analysis_enabled') else '❌ DESHABILITADO'}")
     logger.info("=" * 60)
     
     # Mostrar uso de tokens al iniciar
@@ -80,7 +80,7 @@ def main():
     
     # Iniciar watchdog
     watchdog.start()
-    logger.info("✅ Watchdog de monitoreo iniciado")
+    logger.info("✔ Watchdog de monitoreo iniciado")
     
     # Ejecutar modo debug si está habilitado
     run_debug_once()
@@ -100,7 +100,7 @@ def main():
             # Cada 10 minutos, mostrar estadísticas
             if cycle % 10 == 0:
                 logger.info("\n" + "=" * 60)
-                logger.info(f"📊 ESTADÍSTICAS (ciclo {cycle})")
+                logger.info(f"ESTADÍSTICAS (ciclo {cycle})")
                 logger.info("=" * 60)
                 
                 # Estadísticas de pollers
@@ -125,9 +125,9 @@ def main():
                 logger.info("=" * 60 + "\n")
             
     except KeyboardInterrupt:
-        logger.info("⚠️ Interrupción por teclado detectada")
+        logger.info("! Interrupción por teclado detectada")
     except Exception as e:
-        logger.error(f"❌ Error fatal en main loop: {e}", exc_info=True)
+        logger.error(f"X Error fatal en main loop: {e}", exc_info=True)
         return 1
     finally:
         # Limpieza al salir
@@ -139,7 +139,7 @@ def main():
         stop_all_pollers()
         
         # Mostrar estadísticas finales
-        logger.info("\n📊 ESTADÍSTICAS FINALES:")
+        logger.info("\nESTADÍSTICAS FINALES:")
         stats = get_all_stats()
         for poller_name, data in stats.items():
             logger.info(
@@ -149,7 +149,7 @@ def main():
                 f"Errores={data.get('errors', 0)}"
             )
         
-        logger.info("\n✅ Sistema detenido correctamente")
+        logger.info("\n✔ Sistema detenido correctamente")
         logger.info("=" * 60)
     
     return 0

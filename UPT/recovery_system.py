@@ -108,7 +108,7 @@ class WatchdogMonitor:
                         component['last_check'] = datetime.now()
                         
                         if not is_healthy:
-                            logger.warning(f"⚠ Componente {name} NO saludable, reiniciando...")
+                            logger.warning(f"Componente {name} NO saludable, reiniciando...")
                             component['restart']()
                             component['restart_count'] += 1
                             component['last_restart'] = datetime.now()

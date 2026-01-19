@@ -1,5 +1,6 @@
 """
 Gestor de tokens para control de límite mensual
+Actualizado para usar GetTokensUsedByMonth
 """
 from datetime import datetime
 from log import get_logger
@@ -23,16 +24,23 @@ class TokenManager:
         self._current_usage = None
         self._last_check = None
     
-    def get_monthly_usage(self, sp_name="GetMonthlyTokenUsage"):
+    def get_monthly_usage(self, sp_name="GetTokensUsedByMonth"):
         """
         Obtiene el uso de tokens del mes actual desde la BD
+        Usa el nuevo SP que retorna 1 fila con 4 columnas:
+        - TranscriptionTokensIn
+        - TranscriptionTokensOut
+        - AnalysisTokensIn
+        - AnalysisTokensOut
         
         Returns:
             dict: {
-                'total_input_tokens': int,
-                'total_output_tokens': int,
+                'transcription_tokens_in': int,
+                'transcription_tokens_out': int,
+                'analysis_tokens_in': int,
+                'analysis_tokens_out': int,
                 'total_tokens': int,
-                'month': str,
+                'month': int,
                 'year': int
             }
         """
@@ -42,17 +50,29 @@ class TokenManager:
             current_year = now.year
             
             # Llamar al SP que retorna el uso mensual
+            # Solo necesita el mes, el SP usa el año actual internamente
             result = ejecutar_query(
-                f"EXEC {sp_name} ?, ?",
-                [current_year, current_month]
+                f"EXEC {sp_name} ?",
+                [current_month]
             )
             
             if result and len(result) > 0:
                 row = result[0]
+                
+                # El SP retorna: TranscriptionTokensIn, TranscriptionTokensOut, AnalysisTokensIn, AnalysisTokensOut
+                transcription_in = row[0] or 0
+                transcription_out = row[1] or 0
+                analysis_in = row[2] or 0
+                analysis_out = row[3] or 0
+                
+                total_tokens = transcription_in + transcription_out + analysis_in + analysis_out
+                
                 usage = {
-                    'total_input_tokens': row[0] or 0,
-                    'total_output_tokens': row[1] or 0,
-                    'total_tokens': (row[0] or 0) + (row[1] or 0),
+                    'transcription_tokens_in': transcription_in,
+                    'transcription_tokens_out': transcription_out,
+                    'analysis_tokens_in': analysis_in,
+                    'analysis_tokens_out': analysis_out,
+                    'total_tokens': total_tokens,
                     'month': current_month,
                     'year': current_year
                 }
@@ -64,8 +84,10 @@ class TokenManager:
             else:
                 # No hay datos aún este mes
                 return {
-                    'total_input_tokens': 0,
-                    'total_output_tokens': 0,
+                    'transcription_tokens_in': 0,
+                    'transcription_tokens_out': 0,
+                    'analysis_tokens_in': 0,
+                    'analysis_tokens_out': 0,
                     'total_tokens': 0,
                     'month': current_month,
                     'year': current_year
@@ -103,7 +125,7 @@ class TokenManager:
                 f"Límite mensual excedido: {current_total:,}/{self.monthly_limit:,} tokens usados. "
                 f"Operación estimada: {estimated_tokens:,} tokens"
             )
-            logger.error(f"🚫 {reason}")
+            logger.error(f"X {reason}")
             return False, reason, usage
         
         # Verificar si está cerca del umbral de advertencia
@@ -111,7 +133,7 @@ class TokenManager:
         
         if usage_percentage >= self.warning_threshold:
             logger.warning(
-                f"⚠️ Advertencia: {usage_percentage*100:.1f}% del límite mensual usado "
+                f"Advertencia: {usage_percentage*100:.1f}% del límite mensual usado "
                 f"({current_total:,}/{self.monthly_limit:,} tokens)"
             )
         
@@ -129,14 +151,19 @@ class TokenManager:
         total = input_tokens + output_tokens
         
         logger.info(
-            f"📊 Tokens usados [{operation_type}]: "
+            f"Tokens usados [{operation_type}]: "
             f"IN={input_tokens:,} | OUT={output_tokens:,} | TOTAL={total:,}"
         )
         
         # Actualizar caché
         if self._current_usage:
-            self._current_usage['total_input_tokens'] += input_tokens
-            self._current_usage['total_output_tokens'] += output_tokens
+            if operation_type == "transcription":
+                self._current_usage['transcription_tokens_in'] += input_tokens
+                self._current_usage['transcription_tokens_out'] += output_tokens
+            elif operation_type == "analysis":
+                self._current_usage['analysis_tokens_in'] += input_tokens
+                self._current_usage['analysis_tokens_out'] += output_tokens
+            
             self._current_usage['total_tokens'] += total
     
     def get_usage_summary(self):
@@ -155,11 +182,12 @@ class TokenManager:
         remaining = self.monthly_limit - usage['total_tokens']
         
         return (
-            f"📊 Uso de Tokens - {usage['month']}/{usage['year']}\n"
+            f"   Uso de Tokens - {usage['month']}/{usage['year']}\n"
             f"   Total usado: {usage['total_tokens']:,} / {self.monthly_limit:,} ({percentage:.1f}%)\n"
-            f"   Input: {usage['total_input_tokens']:,} | Output: {usage['total_output_tokens']:,}\n"
+            f"   Transcripción: IN={usage['transcription_tokens_in']:,} | OUT={usage['transcription_tokens_out']:,}\n"
+            f"   Análisis: IN={usage['analysis_tokens_in']:,} | OUT={usage['analysis_tokens_out']:,}\n"
             f"   Restante: {remaining:,} tokens\n"
-            f"   Estado: {'✅ OK' if percentage < self.warning_threshold * 100 else '⚠️ Alto'}"
+            f"   Estado: {'✔ OK' if percentage < self.warning_threshold * 100 else '! Alto'}"
         )
 
 

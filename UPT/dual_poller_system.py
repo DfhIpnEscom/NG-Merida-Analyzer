@@ -1,11 +1,16 @@
 """
 Sistema dual de polling: uno para transcripción y otro para análisis
+Actualizado para usar GetPendingTranscription y GetPendingAnalisys (FIFO)
 """
 import threading
 import time
 from datetime import datetime
 from log import get_logger
-from sql_connection import obtener_registros_pendientes, ejecutar_sp
+from sql_connection import (
+    obtener_registros_pendientes, 
+    incrementar_reintentos, 
+    actualizar_estado
+)
 from audio_process import procesar_transcripcion, procesar_analisis
 from connection_settings import SQL_POLLING_CONFIG, PROCESSING_FEATURES
 from token_manager import get_token_manager
@@ -46,31 +51,25 @@ class BasePoller:
         
         if new_count >= max_retries:
             logger.error(
-                f"❌ {self.name} - TransactionId {transaction_id} excedió "
+                f"X {self.name} - TransactionId {transaction_id} excedió "
                 f"{max_retries} reintentos. Marcando como ERROR."
             )
             try:
                 # Marcar como error en la BD
-                ejecutar_sp(
-                    "UpdateTransactionStatus",
-                    [transaction_id, SQL_POLLING_CONFIG['status_error'], new_count]
-                )
-            except:
-                logger.error(f"No se pudo actualizar estado a ERROR para {transaction_id}")
+                actualizar_estado(transaction_id, 'Error', new_count)
+            except Exception as e:
+                logger.error(f"No se pudo actualizar estado a ERROR para {transaction_id}: {e}")
             return True
         else:
             logger.warning(
-                f"⚠️ {self.name} - TransactionId {transaction_id} falló. "
+                f"{self.name} - TransactionId {transaction_id} falló. "
                 f"Reintento {new_count}/{max_retries}"
             )
             try:
                 # Solo incrementar contador
-                ejecutar_sp(
-                    "IncrementRetryCount",
-                    [transaction_id, new_count]
-                )
-            except:
-                logger.error(f"No se pudo incrementar contador de reintentos para {transaction_id}")
+                incrementar_reintentos(transaction_id, new_count)
+            except Exception as e:
+                logger.error(f"No se pudo incrementar contador de reintentos para {transaction_id}: {e}")
             return False
     
     def start(self):
@@ -89,7 +88,7 @@ class BasePoller:
         )
         self.polling_thread.start()
         
-        logger.info(f"✅ {self.name} iniciado")
+        logger.info(f"✔ {self.name} iniciado")
     
     def stop(self):
         """Detiene el polling"""
@@ -103,7 +102,7 @@ class BasePoller:
         if self.polling_thread:
             self.polling_thread.join(timeout=10)
         
-        logger.info(f"✅ {self.name} detenido")
+        logger.info(f"✔ {self.name} detenido")
     
     def is_healthy(self):
         """Health check"""
@@ -123,18 +122,21 @@ class BasePoller:
 
 
 class TranscriptionPoller(BasePoller):
-    """Poller para transcripciones pendientes"""
+    """Poller para transcripciones pendientes (FIFO)"""
     
     def __init__(self):
         config = SQL_POLLING_CONFIG.get('transcription', {})
         super().__init__("TranscriptionPoller", config)
-        self.sp_get_pending = config.get('sp_get_pending', 'GetPendingTranscriptions')
+        # Usar el nuevo SP: GetPendingTranscription
+        self.sp_get_pending = config.get('sp_get_pending', 'GetPendingTranscription')
     
     def _polling_loop(self):
         logger.info("=" * 60)
         logger.info(f"{self.name} iniciado")
         logger.info(f"SP: {self.sp_get_pending}")
-        logger.info(f"Intervalo: {self.config.get('poll_interval_seconds', 30)}s")
+        logger.info(f"Intervalo: {self.config.get('poll_interval_seconds', 15)}s")
+        logger.info(f"Máx por batch: {self.config.get('max_records_per_batch', 5)}")
+        logger.info("Sistema FIFO - Los más antiguos primero")
         logger.info("=" * 60)
         
         cycle = 0
@@ -146,13 +148,13 @@ class TranscriptionPoller(BasePoller):
             try:
                 if not PROCESSING_FEATURES.get('transcription_enabled', True):
                     logger.debug(f"{self.name} - Transcripción deshabilitada, esperando...")
-                    time.sleep(self.config.get('poll_interval_seconds', 30))
+                    self.stop_event.wait(self.config.get('poll_interval_seconds', 15))
                     continue
                 
-                # Obtener registros pendientes
+                # Obtener registros pendientes usando GetPendingTranscription
                 registros = obtener_registros_pendientes(
                     self.sp_get_pending,
-                    tipo_proceso="transcripcion"
+                    tipo_proceso="transcription"
                 )
                 
                 if registros:
@@ -168,7 +170,7 @@ class TranscriptionPoller(BasePoller):
                         audio_path = registro['audio_path']
                         retry_count = registro.get('retry_count', 0)
                         
-                        logger.info(f"▶️ Procesando transcripción: {transaction_id}")
+                        logger.info(f"▶Procesando transcripción: {transaction_id}")
                         
                         # Procesar
                         success, tokens_in, tokens_out, _ = procesar_transcripcion(
@@ -179,7 +181,7 @@ class TranscriptionPoller(BasePoller):
                         if success:
                             self.stats['processed'] += 1
                             logger.info(
-                                f"✅ Transcripción {transaction_id} completada - "
+                                f"✔ Transcripción {transaction_id} completada - "
                                 f"Tokens: IN={tokens_in} OUT={tokens_out}"
                             )
                         else:
@@ -194,30 +196,33 @@ class TranscriptionPoller(BasePoller):
                     logger.debug(f"{self.name} - Sin transcripciones pendientes (ciclo {cycle})")
                 
             except Exception as e:
-                logger.error(f"❌ Error en {self.name} (ciclo {cycle}): {e}", exc_info=True)
+                logger.error(f"Error en {self.name} (ciclo {cycle}): {e}", exc_info=True)
             
             # Cada 20 ciclos, mostrar resumen de uso de tokens
             if cycle % 20 == 0:
                 logger.info("\n" + token_manager.get_usage_summary())
             
-            self.stop_event.wait(self.config.get('poll_interval_seconds', 30))
+            self.stop_event.wait(self.config.get('poll_interval_seconds', 15))
         
         logger.info(f"{self.name} detenido")
 
 
 class AnalysisPoller(BasePoller):
-    """Poller para análisis pendientes"""
+    """Poller para análisis pendientes (FIFO)"""
     
     def __init__(self):
         config = SQL_POLLING_CONFIG.get('analysis', {})
         super().__init__("AnalysisPoller", config)
-        self.sp_get_pending = config.get('sp_get_pending', 'GetPendingAnalysis')
+        # Usar el nuevo SP: GetPendingAnalisys (con typo intencional)
+        self.sp_get_pending = config.get('sp_get_pending', 'GetPendingAnalisys')
     
     def _polling_loop(self):
         logger.info("=" * 60)
         logger.info(f"{self.name} iniciado")
         logger.info(f"SP: {self.sp_get_pending}")
         logger.info(f"Intervalo: {self.config.get('poll_interval_seconds', 30)}s")
+        logger.info(f"Máx por batch: {self.config.get('max_records_per_batch', 2)}")
+        logger.info("Sistema FIFO - Los más antiguos primero")
         logger.info("=" * 60)
         
         cycle = 0
@@ -229,13 +234,13 @@ class AnalysisPoller(BasePoller):
             try:
                 if not PROCESSING_FEATURES.get('analysis_enabled', True):
                     logger.debug(f"{self.name} - Análisis deshabilitado, esperando...")
-                    time.sleep(self.config.get('poll_interval_seconds', 30))
+                    self.stop_event.wait(self.config.get('poll_interval_seconds', 30))
                     continue
                 
-                # Obtener registros pendientes
+                # Obtener registros pendientes usando GetPendingAnalisys
                 registros = obtener_registros_pendientes(
                     self.sp_get_pending,
-                    tipo_proceso="analisis"
+                    tipo_proceso="analysis"
                 )
                 
                 if registros:
@@ -252,7 +257,7 @@ class AnalysisPoller(BasePoller):
                         transcription_path = registro.get('transcription_path')
                         retry_count = registro.get('retry_count', 0)
                         
-                        logger.info(f"▶️ Procesando análisis: {transaction_id}")
+                        logger.info(f"▶Procesando análisis: {transaction_id}")
                         
                         # Procesar
                         success, tokens_in, tokens_out = procesar_analisis(
@@ -264,7 +269,7 @@ class AnalysisPoller(BasePoller):
                         if success:
                             self.stats['processed'] += 1
                             logger.info(
-                                f"✅ Análisis {transaction_id} completado - "
+                                f"✔ Análisis {transaction_id} completado - "
                                 f"Tokens: IN={tokens_in} OUT={tokens_out}"
                             )
                         else:
@@ -279,7 +284,7 @@ class AnalysisPoller(BasePoller):
                     logger.debug(f"{self.name} - Sin análisis pendientes (ciclo {cycle})")
                 
             except Exception as e:
-                logger.error(f"❌ Error en {self.name} (ciclo {cycle}): {e}", exc_info=True)
+                logger.error(f"X Error en {self.name} (ciclo {cycle}): {e}", exc_info=True)
             
             # Cada 20 ciclos, mostrar resumen de uso de tokens
             if cycle % 20 == 0:

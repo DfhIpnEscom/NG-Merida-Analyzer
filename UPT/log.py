@@ -25,7 +25,7 @@ class LogManager:
             log_file,
             when="midnight",  # Rota a medianoche
             interval=1,
-            backupCount=30,  # Mantiene 30 días de logs
+            backupCount=365,  # Mantiene 30 días de logs
             encoding="utf-8"
         )
         file_handler.setLevel(logging.DEBUG)
