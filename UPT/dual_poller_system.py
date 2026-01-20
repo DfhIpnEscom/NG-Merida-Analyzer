@@ -1,15 +1,11 @@
-"""
-Sistema dual de polling: uno para transcripción y otro para análisis
-Actualizado para usar GetPendingTranscription y GetPendingAnalisys (FIFO)
-"""
 import threading
 import time
 from datetime import datetime
 from log import get_logger
 from sql_connection import (
     obtener_registros_pendientes, 
-    incrementar_reintentos, 
-    actualizar_estado
+    actualizar_estado,
+    marcar_como_error
 )
 from audio_process import procesar_transcripcion, procesar_analisis
 from connection_settings import SQL_POLLING_CONFIG, PROCESSING_FEATURES
@@ -20,7 +16,7 @@ token_manager = get_token_manager()
 
 
 class BasePoller:
-    """Clase base para pollers"""
+    """Clase base para pollers con tracking interno de reintentos"""
     
     def __init__(self, name, config):
         self.name = name
@@ -32,45 +28,60 @@ class BasePoller:
             'processed': 0,
             'failed': 0,
             'errors': 0,
+            'warnings': 0,  # Nuevo: contador de warnings
             'last_run': None
         }
+        # Tracking de reintentos en memoria: {transaction_id: retry_count}
+        self.retry_tracker = {}
+        self.max_retries = config.get('max_retries', 3)
     
-    def _update_retry_count(self, transaction_id, current_count):
+    def _update_retry_count(self, transaction_id):
         """
-        Incrementa el contador de reintentos y marca como error si excede el máximo
+        Maneja reintentos internamente con tracker en memoria
+        Marca como error si excede el máximo
         
         Args:
             transaction_id: ID de la transacción
-            current_count: Conteo actual de reintentos
         
         Returns:
-            bool: True si debe marcarse como error
+            bool: True si debe marcarse como error y no reintentar
         """
-        max_retries = self.config.get('max_retries', 3)
+        # Obtener conteo actual del tracker interno
+        current_count = self.retry_tracker.get(transaction_id, 0)
         new_count = current_count + 1
         
-        if new_count >= max_retries:
+        # Actualizar tracker
+        self.retry_tracker[transaction_id] = new_count
+        
+        if new_count >= self.max_retries:
             logger.error(
-                f"X {self.name} - TransactionId {transaction_id} excedió "
-                f"{max_retries} reintentos. Marcando como ERROR."
+                f"✗✗✗ {self.name} - TransactionId {transaction_id} excedió "
+                f"{self.max_retries} reintentos. Marcando como ERROR."
             )
             try:
                 # Marcar como error en la BD
-                actualizar_estado(transaction_id, 'Error', new_count)
+                marcar_como_error(
+                    transaction_id, 
+                    f"{self.name}: Máximo de {self.max_retries} reintentos alcanzado"
+                )
+                # Limpiar del tracker
+                del self.retry_tracker[transaction_id]
             except Exception as e:
-                logger.error(f"No se pudo actualizar estado a ERROR para {transaction_id}: {e}")
+                logger.error(f"No se pudo marcar como ERROR para {transaction_id}: {e}")
             return True
         else:
+            # Solo logear - el conteo está en memoria
             logger.warning(
-                f"{self.name} - TransactionId {transaction_id} falló. "
-                f"Reintento {new_count}/{max_retries}"
+                f"⚠ {self.name} - TransactionId {transaction_id} falló. "
+                f"Intento {new_count}/{self.max_retries}"
             )
-            try:
-                # Solo incrementar contador
-                incrementar_reintentos(transaction_id, new_count)
-            except Exception as e:
-                logger.error(f"No se pudo incrementar contador de reintentos para {transaction_id}: {e}")
             return False
+    
+    def _clear_retry_on_success(self, transaction_id):
+        """Limpia el contador de reintentos cuando un proceso tiene éxito"""
+        if transaction_id in self.retry_tracker:
+            logger.debug(f"Limpiando retry tracker para {transaction_id}")
+            del self.retry_tracker[transaction_id]
     
     def start(self):
         """Inicia el polling"""
@@ -88,7 +99,7 @@ class BasePoller:
         )
         self.polling_thread.start()
         
-        logger.info(f"✔ {self.name} iniciado")
+        logger.info(f"✓ {self.name} iniciado")
     
     def stop(self):
         """Detiene el polling"""
@@ -102,7 +113,7 @@ class BasePoller:
         if self.polling_thread:
             self.polling_thread.join(timeout=10)
         
-        logger.info(f"✔ {self.name} detenido")
+        logger.info(f"✓ {self.name} detenido")
     
     def is_healthy(self):
         """Health check"""
@@ -127,7 +138,6 @@ class TranscriptionPoller(BasePoller):
     def __init__(self):
         config = SQL_POLLING_CONFIG.get('transcription', {})
         super().__init__("TranscriptionPoller", config)
-        # Usar el nuevo SP: GetPendingTranscription
         self.sp_get_pending = config.get('sp_get_pending', 'GetPendingTranscription')
     
     def _polling_loop(self):
@@ -136,6 +146,7 @@ class TranscriptionPoller(BasePoller):
         logger.info(f"SP: {self.sp_get_pending}")
         logger.info(f"Intervalo: {self.config.get('poll_interval_seconds', 15)}s")
         logger.info(f"Máx por batch: {self.config.get('max_records_per_batch', 5)}")
+        logger.info(f"Reintentos: {self.max_retries}")
         logger.info("Sistema FIFO - Los más antiguos primero")
         logger.info("=" * 60)
         
@@ -151,7 +162,7 @@ class TranscriptionPoller(BasePoller):
                     self.stop_event.wait(self.config.get('poll_interval_seconds', 15))
                     continue
                 
-                # Obtener registros pendientes usando GetPendingTranscription
+                # Obtener registros pendientes
                 registros = obtener_registros_pendientes(
                     self.sp_get_pending,
                     tipo_proceso="transcription"
@@ -159,7 +170,7 @@ class TranscriptionPoller(BasePoller):
                 
                 if registros:
                     logger.info(
-                        f"🎤 {self.name} - {len(registros)} transcripciones pendientes (ciclo {cycle})"
+                        f"🎤 {self.name} - {len(registros)} transcripciones procesables (ciclo {cycle})"
                     )
                     
                     for registro in registros:
@@ -168,26 +179,59 @@ class TranscriptionPoller(BasePoller):
                         
                         transaction_id = registro['transaction_id']
                         audio_path = registro['audio_path']
-                        retry_count = registro.get('retry_count', 0)
                         
                         logger.info(f"▶Procesando transcripción: {transaction_id}")
                         
-                        # Procesar
-                        success, tokens_in, tokens_out, _ = procesar_transcripcion(
-                            transaction_id,
-                            audio_path
-                        )
-                        
-                        if success:
-                            self.stats['processed'] += 1
-                            logger.info(
-                                f"✔ Transcripción {transaction_id} completada - "
-                                f"Tokens: IN={tokens_in} OUT={tokens_out}"
+                        # Procesar con manejo de errores críticos vs warnings
+                        try:
+                            success, tokens_in, tokens_out, _ = procesar_transcripcion(
+                                transaction_id,
+                                audio_path
                             )
-                        else:
+                            
+                            if success:
+                                self.stats['processed'] += 1
+                                self._clear_retry_on_success(transaction_id)
+                                logger.info(
+                                    f"✓ Transcripción {transaction_id} completada - "
+                                    f"Tokens: IN={tokens_in} OUT={tokens_out}"
+                                )
+                            else:
+                                # WARNING: No se obtuvo transcripción (audio sin voz, ininteligible, etc.)
+                                # No cuenta como fallo que requiera reintento
+                                self.stats['warnings'] += 1
+                                self._clear_retry_on_success(transaction_id)
+                                logger.warning(
+                                    f"⚠ WARNING: TransactionId {transaction_id} - "
+                                    f"No se obtuvo transcripción válida (audio sin voz/ininteligible)"
+                                )
+                                # Marcar como completado de todas formas (es un warning, no error)
+                                try:
+                                    actualizar_estado(transaction_id, 'Completado')
+                                except Exception as e:
+                                    logger.error(f"No se pudo actualizar estado: {e}")
+                        
+                        except FileNotFoundError as e:
+                            # ERROR CRÍTICO: Archivo no existe
                             self.stats['failed'] += 1
-                            # Actualizar contador de reintentos
-                            is_error = self._update_retry_count(transaction_id, retry_count)
+                            logger.error(f"✗ ERROR CRÍTICO: {e}")
+                            is_error = self._update_retry_count(transaction_id)
+                            if is_error:
+                                self.stats['errors'] += 1
+                        
+                        except RuntimeError as e:
+                            # ERROR CRÍTICO: Límite de tokens excedido
+                            self.stats['failed'] += 1
+                            logger.error(f"✗ ERROR CRÍTICO: {e}")
+                            is_error = self._update_retry_count(transaction_id)
+                            if is_error:
+                                self.stats['errors'] += 1
+                        
+                        except Exception as e:
+                            # ERROR CRÍTICO: Excepción inesperada
+                            self.stats['failed'] += 1
+                            logger.error(f"✗ ERROR CRÍTICO inesperado: {e}", exc_info=True)
+                            is_error = self._update_retry_count(transaction_id)
                             if is_error:
                                 self.stats['errors'] += 1
                         
@@ -198,7 +242,7 @@ class TranscriptionPoller(BasePoller):
             except Exception as e:
                 logger.error(f"Error en {self.name} (ciclo {cycle}): {e}", exc_info=True)
             
-            # Cada 20 ciclos, mostrar resumen de uso de tokens
+            # Cada 20 ciclos, mostrar resumen
             if cycle % 20 == 0:
                 logger.info("\n" + token_manager.get_usage_summary())
             
@@ -213,7 +257,6 @@ class AnalysisPoller(BasePoller):
     def __init__(self):
         config = SQL_POLLING_CONFIG.get('analysis', {})
         super().__init__("AnalysisPoller", config)
-        # Usar el nuevo SP: GetPendingAnalisys (con typo intencional)
         self.sp_get_pending = config.get('sp_get_pending', 'GetPendingAnalisys')
     
     def _polling_loop(self):
@@ -222,6 +265,7 @@ class AnalysisPoller(BasePoller):
         logger.info(f"SP: {self.sp_get_pending}")
         logger.info(f"Intervalo: {self.config.get('poll_interval_seconds', 30)}s")
         logger.info(f"Máx por batch: {self.config.get('max_records_per_batch', 2)}")
+        logger.info(f"Reintentos: {self.max_retries}")
         logger.info("Sistema FIFO - Los más antiguos primero")
         logger.info("=" * 60)
         
@@ -237,7 +281,7 @@ class AnalysisPoller(BasePoller):
                     self.stop_event.wait(self.config.get('poll_interval_seconds', 30))
                     continue
                 
-                # Obtener registros pendientes usando GetPendingAnalisys
+                # Obtener registros pendientes
                 registros = obtener_registros_pendientes(
                     self.sp_get_pending,
                     tipo_proceso="analysis"
@@ -245,7 +289,7 @@ class AnalysisPoller(BasePoller):
                 
                 if registros:
                     logger.info(
-                        f"🔍 {self.name} - {len(registros)} análisis pendientes (ciclo {cycle})"
+                        f"📊 {self.name} - {len(registros)} análisis procesables (ciclo {cycle})"
                     )
                     
                     for registro in registros:
@@ -255,27 +299,47 @@ class AnalysisPoller(BasePoller):
                         transaction_id = registro['transaction_id']
                         audio_path = registro['audio_path']
                         transcription_path = registro.get('transcription_path')
-                        retry_count = registro.get('retry_count', 0)
                         
                         logger.info(f"▶Procesando análisis: {transaction_id}")
                         
-                        # Procesar
-                        success, tokens_in, tokens_out = procesar_analisis(
-                            transaction_id,
-                            audio_path,
-                            transcription_path
-                        )
-                        
-                        if success:
-                            self.stats['processed'] += 1
-                            logger.info(
-                                f"✔ Análisis {transaction_id} completado - "
-                                f"Tokens: IN={tokens_in} OUT={tokens_out}"
+                        # Procesar con manejo de errores críticos vs warnings
+                        try:
+                            success, tokens_in, tokens_out = procesar_analisis(
+                                transaction_id,
+                                audio_path,
+                                transcription_path
                             )
-                        else:
+                            
+                            if success:
+                                self.stats['processed'] += 1
+                                self._clear_retry_on_success(transaction_id)
+                                logger.info(
+                                    f"✓ Análisis {transaction_id} completado - "
+                                    f"Tokens: IN={tokens_in} OUT={tokens_out}"
+                                )
+                            else:
+                                # WARNING: No se encontró transcripción (probablemente aún no se creó)
+                                # Esto es esperable - el TranscriptionPoller está trabajando en ello
+                                self.stats['warnings'] += 1
+                                logger.warning(
+                                    f"⚠ WARNING: TransactionId {transaction_id} - "
+                                    f"Transcripción no disponible (esperando que se complete)"
+                                )
+                                # No limpiar retry tracker - intentar de nuevo en el próximo ciclo
+                        
+                        except RuntimeError as e:
+                            # ERROR CRÍTICO: Límite de tokens excedido
                             self.stats['failed'] += 1
-                            # Actualizar contador de reintentos
-                            is_error = self._update_retry_count(transaction_id, retry_count)
+                            logger.error(f"✗ ERROR CRÍTICO: {e}")
+                            is_error = self._update_retry_count(transaction_id)
+                            if is_error:
+                                self.stats['errors'] += 1
+                        
+                        except Exception as e:
+                            # ERROR CRÍTICO: Excepción inesperada
+                            self.stats['failed'] += 1
+                            logger.error(f"✗ ERROR CRÍTICO inesperado: {e}", exc_info=True)
+                            is_error = self._update_retry_count(transaction_id)
                             if is_error:
                                 self.stats['errors'] += 1
                         
@@ -284,9 +348,9 @@ class AnalysisPoller(BasePoller):
                     logger.debug(f"{self.name} - Sin análisis pendientes (ciclo {cycle})")
                 
             except Exception as e:
-                logger.error(f"X Error en {self.name} (ciclo {cycle}): {e}", exc_info=True)
+                logger.error(f"✗ Error en {self.name} (ciclo {cycle}): {e}", exc_info=True)
             
-            # Cada 20 ciclos, mostrar resumen de uso de tokens
+            # Cada 20 ciclos, mostrar resumen
             if cycle % 20 == 0:
                 logger.info("\n" + token_manager.get_usage_summary())
             

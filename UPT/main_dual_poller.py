@@ -1,6 +1,3 @@
-"""
-Main con sistema dual polling ✔
-"""
 import threading
 import time
 import sys
@@ -37,8 +34,8 @@ def main():
     logger.info("=" * 60)
     logger.info("AI EVALUATOR - SISTEMA DUAL DE POLLING")
     logger.info("=" * 60)
-    logger.info(f"Transcripción: {'✔ HABILITADA' if PROCESSING_FEATURES.get('transcription_enabled') else '❌ DESHABILITADA'}")
-    logger.info(f"Análisis: {'✔ HABILITADO' if PROCESSING_FEATURES.get('analysis_enabled') else '❌ DESHABILITADO'}")
+    logger.info(f"Transcripción: {'✔ HABILITADA' if PROCESSING_FEATURES.get('transcription_enabled') else '✖ DESHABILITADA'}")
+    logger.info(f"Análisis: {'✔ HABILITADO' if PROCESSING_FEATURES.get('analysis_enabled') else '✖ DESHABILITADO'}")
     logger.info("=" * 60)
     
     # Mostrar uso de tokens al iniciar
@@ -110,7 +107,8 @@ def main():
                         f"  {poller_name.upper()}: "
                         f"Procesados={data.get('processed', 0)} | "
                         f"Fallidos={data.get('failed', 0)} | "
-                        f"Errores={data.get('errors', 0)}"
+                        f"Errores={data.get('errors', 0)} | "
+                        f"Warnings={data.get('warnings', 0)}"
                     )
                 
                 # Estadísticas de watchdog
@@ -125,9 +123,9 @@ def main():
                 logger.info("=" * 60 + "\n")
             
     except KeyboardInterrupt:
-        logger.info("! Interrupción por teclado detectada")
+        logger.info("⚠ Interrupción por teclado detectada")
     except Exception as e:
-        logger.error(f"X Error fatal en main loop: {e}", exc_info=True)
+        logger.error(f"✗ Error fatal en main loop: {e}", exc_info=True)
         return 1
     finally:
         # Limpieza al salir
@@ -143,13 +141,22 @@ def main():
         stats = get_all_stats()
         for poller_name, data in stats.items():
             logger.info(
-                f"  {poller_name.upper()}: "
-                f"Procesados={data.get('processed', 0)} | "
-                f"Fallidos={data.get('failed', 0)} | "
-                f"Errores={data.get('errors', 0)}"
+                f"  {poller_name.upper()}:"
+            )
+            logger.info(
+                f"    • Procesados exitosamente: {data.get('processed', 0)}"
+            )
+            logger.info(
+                f"    • Fallos (requirieron reintentos): {data.get('failed', 0)}"
+            )
+            logger.info(
+                f"    • Errores críticos (marcados como ERROR): {data.get('errors', 0)}"
+            )
+            logger.info(
+                f"    • Warnings (audio sin voz/ininteligible): {data.get('warnings', 0)}"
             )
         
-        logger.info("\n✔ Sistema detenido correctamente")
+        logger.info("\n✓ Sistema detenido correctamente")
         logger.info("=" * 60)
     
     return 0

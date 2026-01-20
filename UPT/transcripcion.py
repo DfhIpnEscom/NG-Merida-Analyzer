@@ -1,6 +1,3 @@
-"""
-Transcripción de audio mejorada con manejo robusto de archivos temporales
-"""
 import os
 from math import ceil
 import speech_recognition as sr
@@ -20,9 +17,12 @@ def transcribir_audio(archivo_original):
         archivo_original: Ruta del archivo de audio original
     
     Returns:
-        str: Texto transcrito
+        str: Texto transcrito o None si no se pudo transcribir
+    
+    Raises:
+        Exception: Si hay un error CRÍTICO que impide el procesamiento
     """
-    # Crear nombres únicos para archivos temporales usando timestamp
+    # Crear nombres únicos para archivos temporales
     timestamp = str(int(time.time() * 1000))
     temp_dir = tempfile.gettempdir()
     
@@ -30,16 +30,50 @@ def transcribir_audio(archivo_original):
     
     try:
         logger.info("Convirtiendo el audio...")
-        sound = AudioSegment.from_file(archivo_original)
-        sound = sound.set_frame_rate(16000).set_channels(1)
-        sound.export(archivo_convertido, format="wav")
+        
+        # ERROR CRÍTICO: Archivo no existe
+        if not os.path.exists(archivo_original):
+            logger.error(f"✗ ERROR CRÍTICO: Archivo no existe: {archivo_original}")
+            raise FileNotFoundError(f"Archivo no existe: {archivo_original}")
+            
+        # WARNING: Archivo vacío (no rompe el proceso, es una situación esperable)
+        file_size = os.path.getsize(archivo_original)
+        if file_size == 0:
+            logger.warning(f"⚠ WARNING: Archivo vacío (0 bytes): {archivo_original}")
+            return None
+        
+        logger.debug(f"Tamaño del archivo: {file_size} bytes")
+        
+        # ERROR CRÍTICO: Fallo al convertir audio
+        try:
+            sound = AudioSegment.from_file(archivo_original)
+            sound = sound.set_frame_rate(16000).set_channels(1)
+            sound.export(archivo_convertido, format="wav")
+        except Exception as e:
+            logger.error(f"✗ ERROR CRÍTICO: No se pudo convertir el audio: {e}")
+            raise  # Propagar el error - es crítico
 
         recognizer = sr.Recognizer()
         audio = AudioSegment.from_wav(archivo_convertido)
+        
+        # WARNING: Audio muy corto (situación esperable)
+        duration_ms = len(audio)
+        duration_sec = duration_ms / 1000
+        logger.debug(f"Duración del audio: {duration_sec:.2f} segundos")
+        
+        if duration_sec < 1:
+            logger.warning(f"⚠ WARNING: Audio muy corto (< 1 segundo) - {duration_sec:.2f}s")
+            return None
+        
         segment_duration = 60 * 1000  # 60 segundos
         num_segments = ceil(len(audio) / segment_duration)
+        
+        logger.info(f"Procesando {num_segments} fragmento(s)...")
 
         transcripcion = ""
+        fragmentos_exitosos = 0
+        fragmentos_vacios = 0
+        fragmentos_con_errores = 0
         
         for i in range(num_segments):
             inicio = i * segment_duration
@@ -58,26 +92,65 @@ def transcribir_audio(archivo_original):
 
                 try:
                     texto = recognizer.recognize_google(audio_data, language="es-ES")
-                    transcripcion += texto + " "
-                    logger.debug(f"Fragmento {i+1}/{num_segments}: OK")
+                    if texto and texto.strip():
+                        transcripcion += texto + " "
+                        fragmentos_exitosos += 1
+                        logger.debug(f"Fragmento {i+1}/{num_segments}: ✓ OK ({len(texto)} chars)")
+                    else:
+                        fragmentos_vacios += 1
+                        logger.debug(f"Fragmento {i+1}/{num_segments}: Texto vacío")
+                        
                 except sr.UnknownValueError:
-                    logger.warning(f"Fragmento {i+1}/{num_segments}: no se entiende el audio")
-                except sr.RequestError as e:
-                    logger.error(f"Error de conexión en el fragmento {i+1}: {e}")
-                    break
+                    # WARNING: Audio ininteligible (situación esperable)
+                    fragmentos_vacios += 1
+                    logger.debug(f"Fragmento {i+1}/{num_segments}: Audio ininteligible")
                     
+                except sr.RequestError as e:
+                    # ERROR NO CRÍTICO: Error de conexión, pero se puede continuar
+                    fragmentos_con_errores += 1
+                    logger.warning(f"⚠ WARNING: Error de conexión en fragmento {i+1}: {e}")
+                    continue
+                    
+            except Exception as e:
+                # ERROR NO CRÍTICO: Error en fragmento individual, pero se puede continuar
+                fragmentos_con_errores += 1
+                logger.warning(f"⚠ WARNING: Error procesando fragmento {i+1}: {e}")
+                
             finally:
-                # Asegurar que el fragmento se elimine
+                # Limpiar fragmento temporal
                 try:
                     if os.path.exists(fragment_path):
                         os.remove(fragment_path)
                 except Exception as e:
-                    logger.warning(f"No se pudo eliminar {fragment_path}: {e}")
+                    logger.debug(f"No se pudo eliminar {fragment_path}: {e}")
 
-        return transcripcion.strip()
+        # Evaluar resultado
+        transcripcion = transcripcion.strip()
+        
+        # WARNING: No se obtuvo transcripción (situación esperable - audio sin voz válida)
+        if not transcripcion:
+            logger.warning(
+                f"⚠ WARNING: No se obtuvo transcripción válida - "
+                f"Exitosos: {fragmentos_exitosos}/{num_segments} | "
+                f"Vacíos/Ininteligibles: {fragmentos_vacios} | "
+                f"Errores: {fragmentos_con_errores}"
+            )
+            return None
+        
+        logger.info(
+            f"✓ Transcripción completada: {len(transcripcion)} caracteres, "
+            f"{fragmentos_exitosos}/{num_segments} fragmentos exitosos"
+        )
+        
+        return transcripcion
+        
+    except FileNotFoundError:
+        # ERROR CRÍTICO: Propagar hacia arriba
+        raise
         
     except Exception as e:
-        logger.error(f"Error en transcripción: {e}")
+        # ERROR CRÍTICO: Excepción inesperada
+        logger.error(f"✗ ERROR CRÍTICO en transcripción: {e}", exc_info=True)
         raise
         
     finally:
@@ -86,4 +159,4 @@ def transcribir_audio(archivo_original):
             if os.path.exists(archivo_convertido):
                 os.remove(archivo_convertido)
         except Exception as e:
-            logger.warning(f"No se pudo eliminar {archivo_convertido}: {e}")
+            logger.debug(f"No se pudo eliminar {archivo_convertido}: {e}")
